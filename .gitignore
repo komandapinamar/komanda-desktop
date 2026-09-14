@@ -1,0 +1,29 @@
+# Dependencias y artefactos generados
+node_modules/
+dist/
+release/
+out/
+build/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# IDE
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Entorno / secretos
+.env
+.env.*
+!.env.example
