@@ -1,0 +1,2 @@
+import { contextBridge, ipcRenderer } from "electron";
+contextBridge.exposeInMainWorld("komanda", { state: () => ipcRenderer.invoke("state"), pair: (apiUrl: string, code: string, name: string) => ipcRenderer.invoke("pair", apiUrl, code, name), saveProfiles: (profiles: unknown[]) => ipcRenderer.invoke("profiles", profiles), testPrinter: (profile: unknown) => ipcRenderer.invoke("test-printer", profile) });

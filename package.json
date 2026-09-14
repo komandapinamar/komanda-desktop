@@ -1,0 +1,50 @@
+{
+  "name": "komanda-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Komanda local ESC/POS network printing agent",
+  "author": {
+    "name": "Komanda",
+    "email": "support@komanda.app"
+  },
+  "homepage": "https://komanda.app",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc && node scripts/copy-renderer.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "build": {
+    "appId": "com.komanda.desktop",
+    "productName": "Komanda Desktop",
+    "directories": {
+      "output": "release"
+    },
+    "linux": {
+      "category": "Utility",
+      "maintainer": "Komanda <support@komanda.app>",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}

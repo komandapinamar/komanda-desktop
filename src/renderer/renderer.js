@@ -1,0 +1,10 @@
+const root = document.querySelector("#root");
+root.innerHTML = `<h1>Komanda Desktop</h1><p id="status">Loading...</p><label>API URL <input id="api" value="http://localhost:3000"></label><label>Pairing code <input id="code" inputmode="numeric" maxlength="4"></label><label>Agent name <input id="name" value="Komanda Desktop"></label><button id="pair">Pair</button><h2>Printer profile</h2><label>Name <input id="printer-name" value="Kitchen"></label><label>Host <input id="host"></label><label>Port <input id="port" type="number" value="9100"></label><label>Width <select id="width"><option value="58">58mm</option><option value="80">80mm</option></select></label><button id="save">Save profile</button><button id="test">Test print</button><p>Network printers use TCP port 9100. The agent token never enters the renderer.</p>`;
+const value = (id) => document.querySelector(`#${id}`).value;
+const profile = () => ({ id: "", name: value("printer-name"), host: value("host"), port: Number(value("port")) || 9100, paperWidth: Number(value("width")), enabled: true });
+let profiles = [];
+const status = document.querySelector("#status");
+document.querySelector("#pair").addEventListener("click", async () => { try { await window.komanda.pair(value("api"), value("code"), value("name")); status.textContent = "Paired. Token is stored securely."; } catch { status.textContent = "Pairing failed."; } });
+document.querySelector("#save").addEventListener("click", async () => { profiles = await window.komanda.saveProfiles([...profiles, profile()]); status.textContent = `${profiles.length} printer profile(s) saved.`; });
+document.querySelector("#test").addEventListener("click", async () => { try { await window.komanda.testPrinter(profile()); status.textContent = "Test print sent."; } catch { status.textContent = "Printer test failed or timed out."; } });
+window.komanda.state().then((value) => { profiles = value.profiles; status.textContent = value.paired ? "Paired and running." : "Not paired."; });
