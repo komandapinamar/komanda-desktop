@@ -1,0 +1,159 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Komanda Desktop — Electron local agent for network ESC/POS printers.
+language: "en-US"
+inheritance: false
+
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  high_level_summary_in_walkthrough: false
+  review_status: true
+  review_details: false
+  poem: false
+  changed_files_summary: true
+  abort_on_close: true
+  commit_status: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    base_branches:
+      - main
+    ignore_title_keywords:
+      - "wip"
+      - "[skip ci]"
+
+  tools:
+    eslint:
+      enabled: true
+      e18e:
+        enabled: false
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    semgrep:
+      enabled: true
+
+  pre_merge_checks:
+    docstrings:
+      enabled: false
+    title:
+      enabled: true
+    issue_assessment:
+      enabled: true
+    custom_checks:
+      - name: "Electron process isolation intact"
+        mode: "error"
+        instructions: |
+          This is an Electron app and must fail this check if any of the
+          following is introduced:
+          - `nodeIntegration: true`, or `contextIsolation: false`, or
+            `webSecurity: false` in the BrowserWindow webPreferences;
+          - a change to `preload.ts` that widens what is exposed over
+            `contextBridge` beyond the current explicit, minimal API;
+          - `remote`, or a renderer process importing Node builtins
+            (`fs`, `net`, `child_process`, `crypto`) directly;
+          - renderer-side navigation or `window.open` to an untrusted
+            origin, or the removal of a navigation/new-window guard;
+          - a `shell.openExternal` call with a URL not validated against an
+            allowlist scheme/host.
+          Pass when renderer code stays sandboxed and all privileged
+          operations go through the narrow preload bridge.
+
+      - name: "Agent token stays OS-protected"
+        mode: "error"
+        instructions: |
+          The pairing token is a bearer credential for the tenant's print
+          queue. Fail if it is stored with plain `localStorage`, an
+          unencrypted JSON file, or written to disk in the clear, or if it
+          appears in any log, error message, or IPC payload sent to the
+          renderer. Require `safeStorage` (or the OS keychain) encryption,
+          and verify re-pairing is handled when decryption fails rather
+          than falling back to plaintext storage.
+
+  path_instructions:
+    - path: "src/main.ts"
+      instructions: |
+        Main process: owns windows, IPC registration, and the print loop.
+        Flag any new IPC handler registered without validating its input at
+        the boundary. Require that IPC errors are returned as sanitized
+        values, since messages cross into the renderer. Ensure the polling
+        timer and any in-flight network socket are cleared on quit.
+
+    - path: "src/preload.ts"
+      instructions: |
+        Security boundary. Expose the smallest possible typed API via
+        `contextBridge`. Flag any addition that passes a raw Node object,
+        a function returning filesystem or network handles, or a bulk
+        channel that lets the renderer invoke arbitrary IPC methods.
+        Keep `ipcRenderer` itself unexposed.
+
+    - path: "src/transport.ts"
+      instructions: |
+        Network transport to the Core print queue. Require TLS, request
+        timeouts, and abort handling on every call. Fail on any request
+        that would log headers containing the agent token, and on retries
+        that are not bounded and backed off. Verify the auth token is sent
+        only to the configured base URL and cannot be redirected elsewhere.
+
+    - path: "src/storage.ts"
+      instructions: |
+        Credential and settings persistence. Require `safeStorage`/keychain
+        for secrets, atomic writes, and restrictive file permissions. Fail
+        on plaintext secret storage, on storing the token in a file that is
+        synced or logged, and on silently ignoring a decryption failure.
+
+    - path: "src/dispatch.ts"
+      instructions: |
+        Job dispatch and printer routing. Verify each print job is
+        acknowledged exactly once and that a failed send does not
+        permanently drop the job. Flag unbounded queues and missing
+        per-printer serialization of ESC/POS writes — concurrent writes to
+        one printer corrupt the byte stream.
+
+    - path: "src/escpos.ts"
+      instructions: |
+        ESC/POS byte encoding. Flag any escape sequence emitted without a
+        length that matches the bytes actually written, and any encoding of
+        untrusted strings as raw bytes without sanitizing control characters
+        (ESC 0x1B, GS, and NUL can inject commands into the printer
+        stream). Require correct handling of partial and multi-byte UTF-8
+        codepoints across chunk boundaries.
+
+    - path: "src/renderer/**"
+      instructions: |
+        Renderer UI. Flag direct DOM APIs that bypass the preload bridge,
+        `innerHTML` with untrusted values, and any token material read from
+        renderer storage. Ensure long-running listeners are removed on
+        unmount.
+
+    - path: "src/**/*.test.ts"
+      instructions: |
+        Vitest suites colocated with source. Require coverage of the failure
+        paths for the module under test, especially token-decryption
+        failure, partial socket writes, and printer-unreachable retries.
+        Flag `.only` and weakened assertions.
+
+    - path: "scripts/**"
+      instructions: |
+        Build and packaging scripts. Flag any step that disables signing,
+        verification, or integrity checks, or that fetches and executes
+        remote content at build time without pinning and verifying it.
+
+    - path: "**/*.yml"
+      instructions: |
+        Workflow and packaging config. Require pinned action versions, least
+        privilege `permissions:`, and no secret exposure in build logs.
+
+  path_filters:
+    - "**/node_modules/**"
+    - "**/dist/**"
+    - "**/coverage/**"
+    - "**/release/**"
+    - "**/*.md"
+
+chat:
+  auto_reply: true
+  art: false
