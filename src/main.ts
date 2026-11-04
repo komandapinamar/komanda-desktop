@@ -1,9 +1,9 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron";
 import { randomUUID } from "node:crypto";
 import { renderTicket, type TicketPayload } from "./escpos";
-import { loadState, saveState, type AppState, type PrinterProfile } from "./storage";
+import { loadState, saveState, loadJournal, saveJournal, type AppState, type PrinterProfile } from "./storage";
 import { sendTcp } from "./transport";
-import { dispatchJob } from "./dispatch";
+import { dispatchJobWithJournal } from "./dispatch";
 import { assertSecureStorage } from "./storage";
 import { z } from "zod";
 
@@ -31,16 +31,73 @@ async function poll() {
   if (polling || !state.token || !state.apiUrl) return;
   polling = true;
   try {
+    const journal = await loadJournal();
+
+    // 1. Flush any pending ACKs first
+    for (const [jobId, entry] of Object.entries(journal)) {
+      if (entry.status === "pending_ack") {
+        const res = await fetchWithTimeout(`${state.apiUrl}/api/v1/print/jobs/${jobId}/result`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${state.token}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": `desktop:${jobId}:${entry.attemptNumber}`,
+          },
+          body: JSON.stringify({
+            status: "printed",
+            attemptNumber: entry.attemptNumber,
+          }),
+        });
+        if (res.ok) {
+          delete journal[jobId];
+          await saveJournal(journal);
+        }
+      }
+    }
+
+    // 2. Claim next print job
     const response = await fetchWithTimeout(`${state.apiUrl}/api/v1/print/jobs/claim`, { method: "POST", headers: { Authorization: `Bearer ${state.token}` } });
     if (response.status === 204 || !response.ok) return;
     const job = jobSchema.parse(await response.json()) as { job: { id: string; attemptNumber: number; payload: TicketPayload } };
-    const printed = await dispatchJob(state.profiles, job.job.payload, (profile, bytes) => sendTcp(profile.host, profile.port, bytes));
+
+    const existingEntry = journal[job.job.id];
+    const alreadyPrinted = new Set(
+      existingEntry
+        ? Object.entries(existingEntry.destinationResults)
+            .filter(([_, st]) => st === "printed")
+            .map(([pid]) => pid)
+        : []
+    );
+
+    const { allSucceeded, destinationResults } = await dispatchJobWithJournal(
+      state.profiles,
+      job.job.payload,
+      (profile, bytes) => sendTcp(profile.host, profile.port, bytes),
+      alreadyPrinted
+    );
+
+    journal[job.job.id] = {
+      jobId: job.job.id,
+      attemptNumber: job.job.attemptNumber,
+      status: allSucceeded ? "pending_ack" : "uncertain",
+      destinationResults,
+      timestamp: Date.now(),
+    };
+    await saveJournal(journal);
+
     const result = await fetchWithTimeout(`${state.apiUrl}/api/v1/print/jobs/${job.job.id}/result`, {
       method: "POST",
       headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json", "Idempotency-Key": `desktop:${job.job.id}:${job.job.attemptNumber}` },
-      body: JSON.stringify({ status: printed ? "printed" : "failed", attemptNumber: job.job.attemptNumber, errorCode: printed ? undefined : "printer_failed" }),
+      body: JSON.stringify({
+        status: allSucceeded ? "printed" : "failed",
+        attemptNumber: job.job.attemptNumber,
+        errorCode: allSucceeded ? undefined : "printer_uncertain",
+      }),
     });
-    if (!result.ok) throw new Error("RESULT_REPORT_FAILED");
+    if (result.ok && allSucceeded) {
+      delete journal[job.job.id];
+      await saveJournal(journal);
+    }
   } finally { polling = false; }
 }
 
